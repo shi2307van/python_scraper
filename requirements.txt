@@ -1,8 +1,8 @@
 fastapi
 uvicorn
 gunicorn
-undetected-chromedriver
-selenium
+undetected-chromedriver>=3.5.0
+selenium>=4.15.0
 beautifulsoup4
 requests
 lxml

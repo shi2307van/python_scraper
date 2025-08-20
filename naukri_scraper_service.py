@@ -67,86 +67,134 @@ def debug_info():
         "python_version": os.sys.version
     }
 
-# ✅ Helper function for creating driver
+# ✅ Helper function for creating driver with multiple fallback strategies
 def get_driver():
-    options = uc.ChromeOptions()
-    options.add_argument("--headless=new")   # Headless mode
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-infobars")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--disable-web-security")
-    options.add_argument("--allow-running-insecure-content")
-    options.add_argument(
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    )
-
-    # ✅ Detect environment and set Chrome binary path
-    chrome_path = None
-    driver_path = None
+    print("🚀 Starting Chrome driver creation...")
     
-    # Try to find Chrome in various locations
-    possible_chrome_paths = [
-        "/usr/bin/google-chrome",
-        "/usr/bin/google-chrome-stable", 
-        "/usr/bin/chromium-browser",
-        "/usr/bin/chromium",
-        shutil.which("google-chrome"),
-        shutil.which("google-chrome-stable"),
-        shutil.which("chromium-browser"),
-        shutil.which("chromium")
-    ]
-    
-    # Find the first valid Chrome path
-    for path in possible_chrome_paths:
-        if path and os.path.exists(path):
-            chrome_path = path
-            print(f"✅ Found Chrome at: {chrome_path}")
-            break
-    
-    # Set binary location only if we found a valid Chrome path
-    if chrome_path:
-        options.binary_location = chrome_path
-    else:
-        print("⚠️ No Chrome binary found, letting undetected_chromedriver handle it")
-    
-    # Try to find ChromeDriver
-    possible_driver_paths = [
-        "/usr/bin/chromedriver",
-        "/usr/local/bin/chromedriver",
-        shutil.which("chromedriver")
-    ]
-    
-    for path in possible_driver_paths:
-        if path and os.path.exists(path):
-            driver_path = path
-            print(f"✅ Found ChromeDriver at: {driver_path}")
-            break
-
+    # Strategy 1: Let undetected_chromedriver handle everything automatically
     try:
+        print("📍 Strategy 1: Auto-detection by undetected_chromedriver")
+        options = uc.ChromeOptions()
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-infobars")
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--remote-debugging-port=9222")
+        options.add_argument(
+            "--user-agent=Mozilla/5.0 (X11; Linux x86_64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        )
+        
+        # Let undetected_chromedriver auto-detect everything
+        driver = uc.Chrome(options=options, version_main=None)
+        print("✅ Strategy 1 successful: Auto-detection worked")
+        return driver
+        
+    except Exception as e1:
+        print(f"❌ Strategy 1 failed: {e1}")
+    
+    # Strategy 2: Use system Chrome with explicit paths
+    try:
+        print("📍 Strategy 2: System Chrome with explicit paths")
+        options = uc.ChromeOptions()
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--window-size=1920,1080")
+        
+        # Try to find Chrome binary
+        chrome_paths = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium-browser",
+            "/opt/google/chrome/google-chrome"
+        ]
+        
+        chrome_binary = None
+        for path in chrome_paths:
+            if os.path.exists(path):
+                chrome_binary = path
+                print(f"✅ Found Chrome binary: {chrome_binary}")
+                break
+        
+        if chrome_binary:
+            options.binary_location = chrome_binary
+        
+        # Try to find ChromeDriver
+        chromedriver_paths = [
+            "/usr/bin/chromedriver",
+            "/usr/local/bin/chromedriver"
+        ]
+        
+        chromedriver_binary = None
+        for path in chromedriver_paths:
+            if os.path.exists(path):
+                chromedriver_binary = path
+                print(f"✅ Found ChromeDriver: {chromedriver_binary}")
+                break
+        
         driver = uc.Chrome(
             options=options,
-            driver_executable_path=driver_path
+            driver_executable_path=chromedriver_binary
         )
+        print("✅ Strategy 2 successful: System Chrome worked")
         return driver
-    except Exception as e:
-        print(f"❌ Error creating driver: {e}")
-        print("🔄 Trying fallback method...")
-        # Fallback - let undetected_chromedriver handle everything
-        fallback_options = uc.ChromeOptions()
-        fallback_options.add_argument("--headless=new")
-        fallback_options.add_argument("--no-sandbox")
-        fallback_options.add_argument("--disable-dev-shm-usage")
-        try:
-            return uc.Chrome(options=fallback_options)
-        except Exception as fallback_error:
-            print(f"❌ Fallback also failed: {fallback_error}")
-            raise Exception(f"Could not create Chrome driver: {e}. Fallback error: {fallback_error}")
+        
+    except Exception as e2:
+        print(f"❌ Strategy 2 failed: {e2}")
+    
+    # Strategy 3: Minimal options fallback
+    try:
+        print("� Strategy 3: Minimal options fallback")
+        options = uc.ChromeOptions()
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        
+        driver = uc.Chrome(options=options)
+        print("✅ Strategy 3 successful: Minimal options worked")
+        return driver
+        
+    except Exception as e3:
+        print(f"❌ Strategy 3 failed: {e3}")
+    
+    # Strategy 4: Use regular Selenium WebDriver as last resort
+    try:
+        print("📍 Strategy 4: Regular Selenium WebDriver")
+        from selenium import webdriver
+        from selenium.webdriver.chrome.service import Service
+        from selenium.webdriver.chrome.options import Options
+        
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        
+        # Try to find ChromeDriver
+        chromedriver_path = shutil.which("chromedriver") or "/usr/bin/chromedriver"
+        if os.path.exists(chromedriver_path):
+            service = Service(chromedriver_path)
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            print("✅ Strategy 4 successful: Regular Selenium worked")
+            return driver
+        else:
+            driver = webdriver.Chrome(options=chrome_options)
+            print("✅ Strategy 4 successful: Regular Selenium with auto-detection worked")
+            return driver
+            
+    except Exception as e4:
+        print(f"❌ Strategy 4 failed: {e4}")
+    
+    # If all strategies fail
+    raise Exception(f"All driver creation strategies failed. Errors: Strategy1={str(e1)[:100]}, Strategy2={str(e2)[:100]}, Strategy3={str(e3)[:100]}, Strategy4={str(e4)[:100]}")
 
 
 @app.get("/scrape/")
