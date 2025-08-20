@@ -2,6 +2,8 @@ from fastapi import FastAPI
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
 import time
+import shutil
+import os
 
 app = FastAPI()
 
@@ -21,13 +23,19 @@ def get_driver():
         "Chrome/114.0.0.0 Safari/537.36"
     )
 
-    # ✅ Render installs Chromium in /usr/bin
-    options.binary_location = "/usr/bin/chromium-browser"
+    # ✅ Detect environment (local vs Render)
+    if os.path.exists("/usr/bin/chromium-browser"):
+        # On Render
+        options.binary_location = "/usr/bin/chromium-browser"
+        driver_path = "/usr/bin/chromedriver"
+    else:
+        # On Local (let uc auto-download chromedriver)
+        options.binary_location = shutil.which("chrome") or shutil.which("chromium")
+        driver_path = None  # uc handles it
 
-    # ✅ Explicit chromedriver path on Render
     driver = uc.Chrome(
         options=options,
-        driver_executable_path="/usr/bin/chromedriver"
+        driver_executable_path=driver_path
     )
     return driver
 
@@ -35,13 +43,11 @@ def get_driver():
 @app.get("/scrape/")
 def scrape_data(keyword: str):
     try:
-        # Initialize job lists
         naukri_jobs = []
         glassdoor_jobs = []
         foundit_jobs = []
         linkedin_jobs = []
 
-        # Example: Scraping Naukri
         driver = get_driver()
         search_url = f"https://www.naukri.com/{keyword}-jobs"
         driver.get(search_url)
@@ -50,7 +56,7 @@ def scrape_data(keyword: str):
         soup = BeautifulSoup(driver.page_source, "html.parser")
         jobs = soup.find_all("article", class_="jobTuple")
 
-        for job in jobs[:5]:  # Limiting results for demo
+        for job in jobs[:5]:
             title = job.find("a", class_="title")
             company = job.find("a", class_="subTitle")
             link = title["href"] if title else None
@@ -62,8 +68,6 @@ def scrape_data(keyword: str):
             })
 
         driver.quit()
-
-        # TODO: Add Glassdoor, Foundit, LinkedIn scrapers (same logic with get_driver)
 
         return {
             "naukri": naukri_jobs,
