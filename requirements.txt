@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+gunicorn
 undetected-chromedriver
 selenium
 beautifulsoup4

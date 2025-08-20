@@ -2,21 +2,37 @@
 # Exit on error
 set -o errexit
 
-# Install Google Chrome
+echo "🔧 Installing Chrome and ChromeDriver..."
+
+# Update package list
 apt-get update
+
+# Install dependencies
 apt-get install -y wget unzip curl
-wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-apt-get install -y ./google-chrome-stable_current_amd64.deb
 
-# Find Chrome version
-CHROME_VERSION=$(google-chrome --version | grep -oP '[0-9.]+' | head -1)
-CHROME_MAJOR=$(echo $CHROME_VERSION | cut -d. -f1)
+# Install Google Chrome
+wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
+echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list
+apt-get update
+apt-get install -y google-chrome-stable
 
-# Install matching ChromeDriver
-wget -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_MAJOR}.0.0/linux64/chromedriver-linux64.zip"
-unzip /tmp/chromedriver.zip -d /usr/bin/
-mv /usr/bin/chromedriver-linux64/chromedriver /usr/bin/chromedriver
+# Find Chrome version and install matching ChromeDriver
+CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
+echo "Chrome version: $CHROME_VERSION"
+
+# Get the latest ChromeDriver version for this Chrome version
+CHROMEDRIVER_VERSION=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_${CHROME_VERSION%%.*}")
+echo "ChromeDriver version: $CHROMEDRIVER_VERSION"
+
+# Download and install ChromeDriver
+wget -O /tmp/chromedriver.zip "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip"
+unzip /tmp/chromedriver.zip -d /tmp/
+mv /tmp/chromedriver-linux64/chromedriver /usr/bin/chromedriver
 chmod +x /usr/bin/chromedriver
+
+# Verify installations
+echo "✅ Chrome path: $(which google-chrome)"
+echo "✅ ChromeDriver path: $(which chromedriver)"
 
 # Install Python dependencies
 pip install -r requirements.txt
