@@ -268,6 +268,287 @@ def debug_page_content(keyword: str = "python"):
         if driver:
             driver.quit()
 
+@app.get("/scrape-multi/")
+def scrape_multiple_sites(keyword: str):
+    """Scrape from multiple job sites to increase success rate"""
+    results = {
+        "success": False,
+        "keyword": keyword,
+        "sources_attempted": [],
+        "sources_successful": [],
+        "naukri": [],
+        "indeed": [],
+        "glassdoor": [],
+        "foundit": [],
+        "linkedin": [],
+        "total_jobs": 0
+    }
+    
+    # Method 1: Try Indeed (usually less restrictive)
+    try:
+        results["sources_attempted"].append("indeed")
+        indeed_jobs = scrape_indeed(keyword)
+        if indeed_jobs:
+            results["indeed"] = indeed_jobs
+            results["sources_successful"].append("indeed")
+            results["total_jobs"] += len(indeed_jobs)
+    except Exception as e:
+        print(f"❌ Indeed scraping failed: {e}")
+    
+    # Method 2: Try TimesJobs (Indian job site, often less restrictive)
+    try:
+        results["sources_attempted"].append("timesjobs")
+        timesjobs_jobs = scrape_timesjobs(keyword)
+        if timesjobs_jobs:
+            results["foundit"] = timesjobs_jobs  # Using foundit field for timesjobs
+            results["sources_successful"].append("timesjobs")
+            results["total_jobs"] += len(timesjobs_jobs)
+    except Exception as e:
+        print(f"❌ TimesJobs scraping failed: {e}")
+    
+    # Method 3: Try Naukri with requests (no Selenium)
+    try:
+        results["sources_attempted"].append("naukri_requests")
+        naukri_jobs = scrape_naukri_requests(keyword)
+        if naukri_jobs:
+            results["naukri"] = naukri_jobs
+            results["sources_successful"].append("naukri_requests")
+            results["total_jobs"] += len(naukri_jobs)
+    except Exception as e:
+        print(f"❌ Naukri requests scraping failed: {e}")
+    
+    results["success"] = results["total_jobs"] > 0
+    return results
+
+def scrape_indeed(keyword: str, limit: int = 5):
+    """Scrape Indeed jobs using requests"""
+    import requests
+    from bs4 import BeautifulSoup
+    
+    jobs = []
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive'
+        }
+        
+        # Indeed India URL
+        search_url = f"https://in.indeed.com/jobs?q={keyword.replace(' ', '+')}&l=India"
+        
+        response = requests.get(search_url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Indeed job selectors
+            job_cards = soup.find_all(['div', 'article'], class_=lambda x: x and any(term in str(x).lower() for term in ['job', 'result', 'card']))
+            
+            for job_card in job_cards[:limit]:
+                try:
+                    # Find title
+                    title_elem = job_card.find(['h2', 'a', 'span'], class_=lambda x: x and 'title' in str(x).lower())
+                    if not title_elem:
+                        title_elem = job_card.find('a', href=lambda x: x and '/viewjob' in str(x))
+                    
+                    # Find company
+                    company_elem = job_card.find(['span', 'div', 'a'], class_=lambda x: x and 'company' in str(x).lower())
+                    
+                    if title_elem:
+                        title = title_elem.get_text(strip=True)
+                        company = company_elem.get_text(strip=True) if company_elem else "N/A"
+                        
+                        # Get link
+                        link = None
+                        if title_elem.name == 'a' and title_elem.get('href'):
+                            link = f"https://in.indeed.com{title_elem['href']}"
+                        
+                        jobs.append({
+                            "title": title,
+                            "company": company,
+                            "link": link,
+                            "source": "indeed"
+                        })
+                        
+                except Exception as e:
+                    continue
+                    
+    except Exception as e:
+        print(f"❌ Indeed error: {e}")
+    
+    return jobs
+
+def scrape_timesjobs(keyword: str, limit: int = 5):
+    """Scrape TimesJobs using requests"""
+    import requests
+    from bs4 import BeautifulSoup
+    
+    jobs = []
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Connection': 'keep-alive'
+        }
+        
+        # TimesJobs URL
+        search_url = f"https://www.timesjobs.com/candidate/job-search.html?searchType=personalizedSearch&from=submit&txtKeywords={keyword.replace(' ', '+')}"
+        
+        response = requests.get(search_url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # TimesJobs selectors
+            job_items = soup.find_all(['li', 'div'], class_=lambda x: x and any(term in str(x).lower() for term in ['job', 'srp', 'listing']))
+            
+            for job_item in job_items[:limit]:
+                try:
+                    # Find title and company
+                    title_elem = job_item.find(['h2', 'h3', 'a'], class_=lambda x: x and any(term in str(x).lower() for term in ['title', 'job']))
+                    company_elem = job_item.find(['h3', 'span', 'a'], class_=lambda x: x and 'company' in str(x).lower())
+                    
+                    if title_elem:
+                        title = title_elem.get_text(strip=True)
+                        company = company_elem.get_text(strip=True) if company_elem else "N/A"
+                        
+                        # Get link
+                        link = None
+                        if title_elem.name == 'a' and title_elem.get('href'):
+                            link = title_elem['href']
+                            if not link.startswith('http'):
+                                link = f"https://www.timesjobs.com{link}"
+                        
+                        jobs.append({
+                            "title": title,
+                            "company": company,
+                            "link": link,
+                            "source": "timesjobs"
+                        })
+                        
+                except Exception as e:
+                    continue
+                    
+    except Exception as e:
+        print(f"❌ TimesJobs error: {e}")
+    
+    return jobs
+
+def scrape_naukri_requests(keyword: str, limit: int = 5):
+    """Enhanced Naukri scraping with more stealth"""
+    import requests
+    from bs4 import BeautifulSoup
+    import time
+    import random
+    
+    jobs = []
+    try:
+        # More realistic headers
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0',
+            'DNT': '1',
+            'Pragma': 'no-cache'
+        }
+        
+        session = requests.Session()
+        session.headers.update(headers)
+        
+        # Try multiple URL formats for Naukri
+        urls_to_try = [
+            f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs",
+            f"https://www.naukri.com/jobs-in-india?k={keyword.replace(' ', '+')}",
+            f"https://www.naukri.com/{keyword.replace(' ', '%20')}-jobs-in-india",
+            f"https://www.naukri.com/java-developer-jobs" if keyword.lower() == 'java' else f"https://www.naukri.com/{keyword}-developer-jobs"
+        ]
+        
+        for i, search_url in enumerate(urls_to_try):
+            try:
+                print(f"🔍 Naukri attempt {i+1}: {search_url}")
+                
+                # Random delay
+                time.sleep(random.uniform(1, 3))
+                
+                response = session.get(search_url, timeout=15)
+                
+                if response.status_code == 200 and "Access Denied" not in response.text and "blocked" not in response.text.lower():
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    
+                    # Try various selectors for Naukri
+                    selectors_to_try = [
+                        'article[class*="jobTuple"]',
+                        'div[class*="jobTuple"]',
+                        'div[class*="job"]',
+                        '.srp-jobtuple-wrapper',
+                        '[data-job-id]'
+                    ]
+                    
+                    job_elements = []
+                    for selector in selectors_to_try:
+                        job_elements = soup.select(selector)
+                        if job_elements:
+                            print(f"✅ Found jobs with selector: {selector}")
+                            break
+                    
+                    for job_elem in job_elements[:limit]:
+                        try:
+                            # Multiple strategies for title extraction
+                            title_elem = (job_elem.select_one('a[class*="title"]') or 
+                                        job_elem.select_one('.title a') or
+                                        job_elem.select_one('h2 a') or
+                                        job_elem.select_one('h3 a'))
+                            
+                            # Multiple strategies for company extraction
+                            company_elem = (job_elem.select_one('a[class*="subTitle"]') or
+                                          job_elem.select_one('.subTitle') or
+                                          job_elem.select_one('[class*="company"]'))
+                            
+                            if title_elem:
+                                title = title_elem.get_text(strip=True)
+                                company = company_elem.get_text(strip=True) if company_elem else "N/A"
+                                
+                                link = None
+                                if title_elem.get('href'):
+                                    link = title_elem['href']
+                                    if not link.startswith('http'):
+                                        link = f"https://www.naukri.com{link}"
+                                
+                                jobs.append({
+                                    "title": title,
+                                    "company": company,
+                                    "link": link,
+                                    "source": "naukri"
+                                })
+                                
+                        except Exception as e:
+                            continue
+                    
+                    if jobs:
+                        break
+                        
+                else:
+                    print(f"⚠️ Naukri URL {i+1} blocked or failed: Status {response.status_code}")
+                    
+            except Exception as e:
+                print(f"❌ Naukri URL {i+1} error: {e}")
+                continue
+                
+    except Exception as e:
+        print(f"❌ Naukri requests error: {e}")
+    
+    return jobs
+
 @app.get("/scrape-alt/")
 def scrape_data_alternative(keyword: str):
     """Alternative scraping method using requests + headers simulation"""
