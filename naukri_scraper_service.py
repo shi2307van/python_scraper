@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import time
 import shutil
 import os
+import subprocess
 
 app = FastAPI()
 
@@ -13,7 +14,58 @@ def health_check():
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "chrome_available": os.path.exists("/usr/bin/google-chrome") or bool(shutil.which("google-chrome"))}
+    chrome_available = os.path.exists("/usr/bin/google-chrome") or bool(shutil.which("google-chrome"))
+    return {
+        "status": "healthy", 
+        "chrome_available": chrome_available,
+        "chrome_paths": {
+            "google-chrome": shutil.which("google-chrome"),
+            "usr_bin_google_chrome": "/usr/bin/google-chrome" if os.path.exists("/usr/bin/google-chrome") else None,
+            "google-chrome-stable": shutil.which("google-chrome-stable"),
+            "chromium": shutil.which("chromium"),
+            "chromium-browser": shutil.which("chromium-browser")
+        },
+        "chromedriver_paths": {
+            "chromedriver": shutil.which("chromedriver"),
+            "usr_bin_chromedriver": "/usr/bin/chromedriver" if os.path.exists("/usr/bin/chromedriver") else None
+        }
+    }
+
+@app.get("/debug")
+def debug_info():
+    """Debug endpoint to check browser availability"""
+    import subprocess
+    try:
+        # Try to get Chrome version
+        chrome_version = subprocess.run(
+            ["google-chrome", "--version"], 
+            capture_output=True, 
+            text=True, 
+            timeout=10
+        )
+        chrome_version_output = chrome_version.stdout.strip() if chrome_version.returncode == 0 else f"Error: {chrome_version.stderr}"
+    except Exception as e:
+        chrome_version_output = f"Exception: {str(e)}"
+    
+    try:
+        # Try to get ChromeDriver version
+        chromedriver_version = subprocess.run(
+            ["chromedriver", "--version"], 
+            capture_output=True, 
+            text=True, 
+            timeout=10
+        )
+        chromedriver_version_output = chromedriver_version.stdout.strip() if chromedriver_version.returncode == 0 else f"Error: {chromedriver_version.stderr}"
+    except Exception as e:
+        chromedriver_version_output = f"Exception: {str(e)}"
+    
+    return {
+        "environment_variables": dict(os.environ),
+        "chrome_version": chrome_version_output,
+        "chromedriver_version": chromedriver_version_output,
+        "working_directory": os.getcwd(),
+        "python_version": os.sys.version
+    }
 
 # ✅ Helper function for creating driver
 def get_driver():
@@ -34,38 +86,67 @@ def get_driver():
         "Chrome/120.0.0.0 Safari/537.36"
     )
 
-    # ✅ Detect environment (local vs deployed)
-    if os.environ.get('RENDER'):
-        # On Render - use Google Chrome installed by build script
-        chrome_path = shutil.which("google-chrome") or "/usr/bin/google-chrome"
-        if os.path.exists(chrome_path):
-            options.binary_location = chrome_path
-        driver_path = "/usr/bin/chromedriver"
-    elif os.path.exists("/usr/bin/chromium-browser"):
-        # Other Linux deployment with chromium
-        options.binary_location = "/usr/bin/chromium-browser"
-        driver_path = "/usr/bin/chromedriver"
+    # ✅ Detect environment and set Chrome binary path
+    chrome_path = None
+    driver_path = None
+    
+    # Try to find Chrome in various locations
+    possible_chrome_paths = [
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable", 
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+        shutil.which("google-chrome"),
+        shutil.which("google-chrome-stable"),
+        shutil.which("chromium-browser"),
+        shutil.which("chromium")
+    ]
+    
+    # Find the first valid Chrome path
+    for path in possible_chrome_paths:
+        if path and os.path.exists(path):
+            chrome_path = path
+            print(f"✅ Found Chrome at: {chrome_path}")
+            break
+    
+    # Set binary location only if we found a valid Chrome path
+    if chrome_path:
+        options.binary_location = chrome_path
     else:
-        # On Local (let uc auto-download chromedriver)
-        chrome_path = shutil.which("chrome") or shutil.which("chromium") or shutil.which("google-chrome")
-        if chrome_path:
-            options.binary_location = chrome_path
-        driver_path = None  # uc handles it
+        print("⚠️ No Chrome binary found, letting undetected_chromedriver handle it")
+    
+    # Try to find ChromeDriver
+    possible_driver_paths = [
+        "/usr/bin/chromedriver",
+        "/usr/local/bin/chromedriver",
+        shutil.which("chromedriver")
+    ]
+    
+    for path in possible_driver_paths:
+        if path and os.path.exists(path):
+            driver_path = path
+            print(f"✅ Found ChromeDriver at: {driver_path}")
+            break
 
     try:
         driver = uc.Chrome(
             options=options,
-            driver_executable_path=driver_path if driver_path and os.path.exists(driver_path) else None
+            driver_executable_path=driver_path
         )
         return driver
     except Exception as e:
-        print(f"Error creating driver: {e}")
+        print(f"❌ Error creating driver: {e}")
+        print("🔄 Trying fallback method...")
         # Fallback - let undetected_chromedriver handle everything
         fallback_options = uc.ChromeOptions()
         fallback_options.add_argument("--headless=new")
         fallback_options.add_argument("--no-sandbox")
         fallback_options.add_argument("--disable-dev-shm-usage")
-        return uc.Chrome(options=fallback_options)
+        try:
+            return uc.Chrome(options=fallback_options)
+        except Exception as fallback_error:
+            print(f"❌ Fallback also failed: {fallback_error}")
+            raise Exception(f"Could not create Chrome driver: {e}. Fallback error: {fallback_error}")
 
 
 @app.get("/scrape/")
