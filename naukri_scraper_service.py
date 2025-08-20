@@ -6,6 +6,7 @@ import shutil
 import os
 import subprocess
 import urllib.parse
+import random
 
 app = FastAPI()
 
@@ -76,6 +77,8 @@ def get_driver():
     try:
         print("📍 Strategy 1: Auto-detection by undetected_chromedriver")
         options = uc.ChromeOptions()
+        
+        # Enhanced stealth arguments
         options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
@@ -83,16 +86,53 @@ def get_driver():
         options.add_argument("--disable-extensions")
         options.add_argument("--disable-infobars")
         options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--disable-automation")
+        options.add_argument("--exclude-switches=enable-automation")
+        options.add_argument("--no-first-run")
+        options.add_argument("--disable-default-apps")
+        options.add_argument("--disable-features=VizDisplayCompositor")
+        options.add_argument("--disable-ipc-flooding-protection")
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--remote-debugging-port=9222")
-        options.add_argument(
-            "--user-agent=Mozilla/5.0 (X11; Linux x86_64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        )
+        
+        # Rotate user agents
+        user_agents = [
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ]
+        import random
+        selected_ua = random.choice(user_agents)
+        options.add_argument(f"--user-agent={selected_ua}")
+        
+        # Additional stealth preferences
+        prefs = {
+            "profile.default_content_setting_values": {
+                "notifications": 2,
+                "geolocation": 2,
+                "media_stream": 2,
+            },
+            "profile.managed_default_content_settings": {
+                "images": 2  # Disable images for faster loading
+            }
+        }
+        options.add_experimental_option("prefs", prefs)
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option('useAutomationExtension', False)
         
         # Let undetected_chromedriver auto-detect everything
         driver = uc.Chrome(options=options, version_main=None)
+        
+        # Execute additional stealth scripts
+        stealth_js = """
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+        Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+        window.chrome = { runtime: {} };
+        Object.defineProperty(navigator, 'permissions', {get: () => ({query: () => Promise.resolve({state: 'granted'})})});
+        """
+        driver.execute_script(stealth_js)
+        
         print("✅ Strategy 1 successful: Auto-detection worked")
         return driver
         
@@ -228,6 +268,101 @@ def debug_page_content(keyword: str = "python"):
         if driver:
             driver.quit()
 
+@app.get("/scrape-alt/")
+def scrape_data_alternative(keyword: str):
+    """Alternative scraping method using requests + headers simulation"""
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        
+        # Simulate browser headers
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0'
+        }
+        
+        # Create session for cookie persistence
+        session = requests.Session()
+        session.headers.update(headers)
+        
+        # Try different URL formats
+        urls_to_try = [
+            f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs",
+            f"https://www.naukri.com/jobs-in-india?k={keyword}",
+            f"https://www.naukri.com/{keyword}-jobs-in-india"
+        ]
+        
+        jobs = []
+        for search_url in urls_to_try:
+            try:
+                print(f"🔍 Trying URL: {search_url}")
+                response = session.get(search_url, timeout=10)
+                
+                if response.status_code == 200 and "Access Denied" not in response.text:
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    
+                    # Try to find job listings
+                    job_elements = soup.find_all(['article', 'div'], class_=lambda x: x and any(term in str(x).lower() for term in ['job', 'tuple', 'listing']))
+                    
+                    for i, job_elem in enumerate(job_elements[:5]):
+                        try:
+                            title_elem = job_elem.find(['a', 'h3', 'h2'], string=True)
+                            company_elem = job_elem.find(['span', 'div', 'a'], class_=lambda x: x and 'company' in str(x).lower())
+                            
+                            if title_elem:
+                                title = title_elem.get_text(strip=True)
+                                company = company_elem.get_text(strip=True) if company_elem else "N/A"
+                                link = title_elem.get('href') if title_elem.name == 'a' else None
+                                
+                                if link and not link.startswith('http'):
+                                    link = f"https://www.naukri.com{link}"
+                                
+                                jobs.append({
+                                    "title": title,
+                                    "company": company,
+                                    "link": link
+                                })
+                        except Exception as e:
+                            continue
+                    
+                    if jobs:
+                        break
+                        
+            except Exception as e:
+                print(f"❌ Error with URL {search_url}: {e}")
+                continue
+        
+        return {
+            "success": len(jobs) > 0,
+            "method": "requests_fallback",
+            "keyword": keyword,
+            "naukri": jobs,
+            "glassdoor": [],
+            "foundit": [],
+            "linkedin": [],
+            "total_jobs": len(jobs)
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Alternative scraping failed: {str(e)}",
+            "method": "requests_fallback",
+            "keyword": keyword,
+            "naukri": [],
+            "glassdoor": [],
+            "foundit": [],
+            "linkedin": []
+        }
+
 @app.get("/scrape/")
 def scrape_data(keyword: str):
     driver = None
@@ -243,14 +378,55 @@ def scrape_data(keyword: str):
         driver = get_driver()
         print("✅ Driver created successfully")
         
-        # Scrape Naukri with proper URL encoding
+        # Scrape Naukri with proper URL encoding and anti-detection
         import urllib.parse
+        import random
+        import time
+        
         encoded_keyword = urllib.parse.quote(keyword.replace(" ", "-"))
         search_url = f"https://www.naukri.com/{encoded_keyword}-jobs"
         print(f"📍 Navigating to: {search_url}")
         
-        driver.get(search_url)
-        print("⏳ Waiting for page to load...")
+        # Random delay to appear more human-like
+        time.sleep(random.uniform(1, 3))
+        
+        # Navigate with retry mechanism for access denied
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                driver.get(search_url)
+                print(f"⏳ Attempt {attempt + 1}: Waiting for page to load...")
+                
+                # Random wait to simulate human behavior
+                time.sleep(random.uniform(3, 6))
+                
+                # Check if we got access denied
+                if "Access Denied" in driver.page_source or "blocked" in driver.page_source.lower():
+                    print(f"🚫 Access denied on attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        print("🔄 Retrying with different approach...")
+                        
+                        # Clear cookies and try again
+                        driver.delete_all_cookies()
+                        
+                        # Try alternative URL format
+                        if attempt == 1:
+                            search_url = f"https://www.naukri.com/jobs-in-india?k={encoded_keyword}"
+                            print(f"🔄 Trying alternative URL: {search_url}")
+                        
+                        time.sleep(random.uniform(5, 10))
+                        continue
+                    else:
+                        print("❌ All attempts failed due to access restrictions")
+                        break
+                else:
+                    print("✅ Successfully accessed the page")
+                    break
+                    
+            except Exception as e:
+                print(f"⚠️ Navigation error on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(random.uniform(5, 10))
         
         # Smart wait for content to load
         try:
@@ -262,14 +438,15 @@ def scrape_data(keyword: str):
             wait = WebDriverWait(driver, 15)
             wait.until(lambda driver: driver.find_elements(By.CSS_SELECTOR, "article, .jobTuple, [data-job-id], .job") or 
                       "No jobs found" in driver.page_source or 
-                      "Sorry" in driver.page_source)
+                      "Sorry" in driver.page_source or
+                      "Access Denied" in driver.page_source)
             
         except Exception as e:
             print(f"⚠️ Smart wait failed, using basic wait: {e}")
             time.sleep(8)
         
-        # Additional wait to ensure full content load
-        time.sleep(3)
+        # Additional random wait to ensure full content load
+        time.sleep(random.uniform(2, 4))
         
         # Try to handle any popups or overlays
         try:
