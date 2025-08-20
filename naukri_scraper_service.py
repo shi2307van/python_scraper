@@ -1,5 +1,5 @@
 """
-Real-Time Multi-Platform Job Scraper
+Real-Time Multi-Platform Job Scraper with Advanced Anti-Detection
 Scrapes live job data from all major platforms simultaneously
 """
 
@@ -22,6 +22,13 @@ import cloudscraper
 import fake_useragent
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import undetected_chromedriver as uc
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 app = FastAPI(
     title="Real-Time Multi-Platform Job Scraper",
@@ -32,10 +39,47 @@ app = FastAPI(
 class RealTimeJobScraper:
     def __init__(self):
         self.session = None
-        self.user_agent_rotator = fake_useragent.UserAgent()
+        self.ua = fake_useragent.UserAgent()
         self.setup_session()
         self.job_cache = {}
         self.cache_expiry = 300  # 5 minutes cache
+        self.driver = None
+        self.setup_driver()
+        
+    def setup_driver(self):
+        """Setup undetected Chrome driver for tough sites"""
+        try:
+            options = uc.ChromeOptions()
+            options.add_argument('--headless=new')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--disable-features=VizDisplayCompositor')
+            options.add_argument('--disable-extensions')
+            options.add_argument('--disable-plugins')
+            options.add_argument('--disable-images')
+            options.add_argument('--disable-javascript')
+            options.add_argument('--user-agent=' + self.ua.random)
+            
+            self.driver = uc.Chrome(options=options, version_main=None)
+            self.driver.set_page_load_timeout(20)
+            print("✅ Chrome driver initialized")
+        except Exception as e:
+            print(f"⚠️ Chrome driver failed: {e}")
+            self.driver = None
+    
+    def get_page_with_driver(self, url: str) -> Optional[str]:
+        """Get page content using undetected Chrome driver"""
+        if not self.driver:
+            return None
+            
+        try:
+            self.driver.get(url)
+            time.sleep(random.uniform(2, 4))
+            return self.driver.page_source
+        except Exception as e:
+            print(f"❌ Driver error for {url}: {e}")
+            return None
         
     def setup_session(self):
         """Setup session with enhanced anti-detection"""
@@ -62,6 +106,57 @@ class RealTimeJobScraper:
             'Cache-Control': 'max-age=0',
             'DNT': '1'
         })
+        
+        # Enable session persistence
+        self.session.cookies.clear()
+        
+    def get_enhanced_headers(self, platform: str = "general") -> dict:
+        """Get platform-specific enhanced headers"""
+        base_headers = {
+            'User-Agent': self.ua.random,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+        }
+        
+        # Platform-specific headers
+        if platform == "indeed":
+            base_headers.update({
+                'Sec-Fetch-Site': 'none',
+                'Referer': 'https://www.google.com/',
+                'Sec-Ch-Ua': '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"'
+            })
+        elif platform == "naukri":
+            base_headers.update({
+                'Referer': 'https://www.naukri.com/',
+                'Origin': 'https://www.naukri.com',
+                'Sec-Fetch-Site': 'same-origin',
+                'X-Requested-With': 'XMLHttpRequest'
+            })
+        elif platform == "timesjobs":
+            base_headers.update({
+                'Referer': 'https://www.timesjobs.com/',
+                'Origin': 'https://www.timesjobs.com',
+                'Sec-Fetch-Site': 'same-origin'
+            })
+        elif platform == "glassdoor":
+            base_headers.update({
+                'Referer': 'https://www.glassdoor.co.in/',
+                'Origin': 'https://www.glassdoor.co.in',
+                'Sec-Fetch-Site': 'same-origin'
+            })
+            
+        return base_headers
     
     def get_random_headers(self):
         """Get randomized headers"""
@@ -78,165 +173,181 @@ class RealTimeJobScraper:
             ])
         }
     
-    def safe_request(self, url: str, max_retries: int = 3) -> Optional[requests.Response]:
-        """Enhanced safe request with better retry logic and error handling"""
-        for attempt in range(max_retries):
+    def enhanced_request(self, url: str, platform: str = "general", use_driver: bool = False) -> Optional[str]:
+        """Enhanced request with multiple fallback strategies"""
+        
+        # Try browser automation first for tough sites
+        if use_driver and self.driver:
+            print(f"🤖 Using browser automation for {platform}")
             try:
-                # Random delay between requests
-                time.sleep(random.uniform(1, 3))
+                self.driver.get(url)
+                time.sleep(random.uniform(3, 6))
                 
-                # Rotate user agent and headers
-                self.session.headers.update(self.get_random_headers())
-                self.session.headers['User-Agent'] = self.ua.random
+                # Wait for page to load
+                WebDriverWait(self.driver, 10).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
                 
-                # Make request with longer timeout
-                response = self.session.get(url, timeout=15, allow_redirects=True)
+                content = self.driver.page_source
+                if len(content) > 2000:
+                    print(f"✅ Browser automation successful for {platform}")
+                    return content
+                    
+            except Exception as e:
+                print(f"❌ Browser automation failed: {e}")
+        
+        # Fallback to enhanced HTTP requests
+        for attempt in range(3):
+            try:
+                print(f"📡 HTTP request attempt {attempt + 1} for {platform}")
                 
-                # Check for successful response
+                # Platform-specific session setup
+                session = cloudscraper.create_scraper(
+                    browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True},
+                    delay=random.uniform(2, 4)
+                )
+                
+                # Use platform-specific headers
+                headers = self.get_enhanced_headers(platform)
+                session.headers.update(headers)
+                
+                # Add random delay
+                time.sleep(random.uniform(2, 5))
+                
+                # Make request
+                response = session.get(url, timeout=20, allow_redirects=True)
+                
                 if response.status_code == 200:
-                    # Validate response content
-                    if len(response.text) > 1000 and not any(blocked in response.text.lower() for blocked in [
+                    content = response.text
+                    
+                    # Check for blocking patterns
+                    blocked_patterns = [
                         'access denied', 'blocked', 'captcha', 'robot', 'bot detection',
-                        'please verify', 'security check', 'unusual traffic'
-                    ]):
-                        return response
+                        'please verify', 'security check', 'unusual traffic', 'access forbidden',
+                        'rate limit', 'too many requests', 'temporarily unavailable'
+                    ]
+                    
+                    content_lower = content.lower()
+                    if any(pattern in content_lower for pattern in blocked_patterns):
+                        print(f"⚠️ Detected blocking pattern in response for {platform}")
+                        continue
+                    
+                    if len(content) > 2000:
+                        print(f"✅ HTTP request successful for {platform}")
+                        return content
                     else:
-                        print(f"⚠️ Response may be blocked or invalid (length: {len(response.text)})")
-                
-                elif response.status_code == 403:
-                    print(f"❌ Access forbidden (403) for {url}")
-                elif response.status_code == 429:
-                    print(f"❌ Rate limited (429) for {url}")
-                    time.sleep(random.uniform(5, 10))  # Longer wait for rate limiting
+                        print(f"⚠️ Response too short ({len(content)} chars) for {platform}")
+                        
                 else:
-                    print(f"❌ HTTP {response.status_code} for {url}")
+                    print(f"❌ HTTP {response.status_code} for {platform}")
                     
             except requests.exceptions.Timeout:
-                print(f"⏰ Timeout on attempt {attempt + 1} for {url}")
-            except requests.exceptions.ConnectionError:
-                print(f"🔌 Connection error on attempt {attempt + 1} for {url}")
+                print(f"⏰ Timeout for {platform} attempt {attempt + 1}")
             except Exception as e:
-                print(f"❌ Request error on attempt {attempt + 1}: {e}")
+                print(f"❌ Request error for {platform}: {e}")
                 
-            # If not the last attempt, wait and recreate session
-            if attempt < max_retries - 1:
-                wait_time = random.uniform(2, 5) * (attempt + 1)  # Exponential backoff
+            # Wait before retry
+            if attempt < 2:
+                wait_time = random.uniform(3, 8) * (attempt + 1)
                 print(f"⏳ Waiting {wait_time:.1f}s before retry...")
                 time.sleep(wait_time)
-                self.setup_session()  # Fresh session
-                
-        print(f"❌ All {max_retries} attempts failed for {url}")
+        
+        print(f"❌ All attempts failed for {platform}")
         return None
     
     def scrape_indeed_realtime(self, keyword: str, location: str = "India") -> List[Dict]:
-        """Enhanced real-time Indeed scraping with better anti-detection"""
+        """Enhanced real-time Indeed scraping with advanced anti-detection"""
         jobs = []
         
         try:
-            # Multiple Indeed domains and URL patterns
+            # Multiple Indeed URLs with different parameters
             indeed_urls = [
-                f"https://in.indeed.com/jobs?q={quote(keyword)}&l={quote(location)}&sort=date",
+                f"https://in.indeed.com/jobs?q={quote(keyword)}&l={quote(location)}&sort=date&fromage=1",
                 f"https://www.indeed.co.in/jobs?q={quote(keyword)}&l={quote(location)}&sort=date",
-                f"https://indeed.com/jobs?q={quote(keyword)}&l={quote(location)}&fromage=1",
-                f"https://in.indeed.com/jobs?q={quote(keyword)}&l=India&fromage=1&sort=date",
-                f"https://www.indeed.co.in/jobs?q={quote(keyword)}&l=Mumbai&sort=date",
-                f"https://www.indeed.co.in/jobs?q={quote(keyword)}&l=Bangalore&sort=date",
-                f"https://www.indeed.co.in/jobs?q={quote(keyword)}&l=Delhi&sort=date"
+                f"https://indeed.com/jobs?q={quote(keyword)}&l={quote(location)}&fromage=1&start=0",
+                f"https://in.indeed.com/jobs?q={quote(keyword)}&l=Bangalore&sort=date&fromage=1",
+                f"https://in.indeed.com/jobs?q={quote(keyword)}&l=Mumbai&sort=date&fromage=1"
             ]
             
-            for url in indeed_urls:
+            for i, url in enumerate(indeed_urls):
                 try:
-                    print(f"🔍 Scraping Indeed: {url}")
+                    print(f"🔍 Indeed attempt {i+1}: {url}")
                     
-                    # Enhanced headers specifically for Indeed
-                    indeed_headers = self.get_random_headers()
-                    indeed_headers.update({
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                        'Accept-Language': 'en-US,en;q=0.9',
-                        'Accept-Encoding': 'gzip, deflate, br',
-                        'DNT': '1',
-                        'Connection': 'keep-alive',
-                        'Upgrade-Insecure-Requests': '1',
-                        'Sec-Fetch-Dest': 'document',
-                        'Sec-Fetch-Mode': 'navigate',
-                        'Sec-Fetch-Site': 'none',
-                        'Sec-Fetch-User': '?1',
-                        'Cache-Control': 'max-age=0',
-                        'Referer': 'https://www.google.com/',
-                        'Sec-Ch-Ua': '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
-                        'Sec-Ch-Ua-Mobile': '?0',
-                        'Sec-Ch-Ua-Platform': '"Windows"'
-                    })
+                    # Use browser automation for first attempts, HTTP for fallback
+                    use_driver = i < 2
+                    content = self.enhanced_request(url, "indeed", use_driver)
                     
-                    self.session.headers.update(indeed_headers)
-                    
-                    # Random delay
-                    time.sleep(random.uniform(3, 6))
-                    
-                    response = self.safe_request(url)
-                    
-                    if response and response.status_code == 200:
-                        soup = BeautifulSoup(response.content, 'html.parser')
+                    if content:
+                        soup = BeautifulSoup(content, 'html.parser')
                         
-                        # Multiple job card selectors to try
+                        # Multiple job card selectors
                         job_selectors = [
                             'div[data-jk]',
                             '.jobsearch-SerpJobCard',
                             '.result',
                             'div[class*="job"]',
                             '.jobsearch-result',
-                            'div[class*="result"]'
+                            'div[class*="result"]',
+                            'td.resultContent'
                         ]
                         
                         job_cards = []
                         for selector in job_selectors:
                             cards = soup.select(selector)
                             if cards:
-                                print(f"✅ Found {len(cards)} job cards with selector: {selector}")
-                                job_cards = cards
+                                print(f"✅ Found {len(cards)} Indeed job cards with selector: {selector}")
+                                job_cards = cards[:10]  # Limit to 10
                                 break
+                        
+                        if not job_cards:
+                            print(f"⚠️ No job cards found with any selector for Indeed")
+                            continue
                         
                         print(f"📝 Processing {len(job_cards)} Indeed job cards")
                         
-                        for i, card in enumerate(job_cards[:10]):
+                        for card_idx, card in enumerate(job_cards):
                             try:
-                                # Multiple title selectors
+                                # Enhanced title extraction
                                 title_elem = None
                                 apply_link = None
                                 
                                 title_selectors = [
+                                    'h2 a span[title]',
                                     'h2 a[data-testid="job-title"]',
-                                    'h2 a',
-                                    'a[data-testid="job-title"]',
+                                    'h2 span a',
                                     '.jobTitle a',
                                     'h3 a',
-                                    'a[title]'
+                                    'a[data-testid="job-title"]'
                                 ]
                                 
                                 for t_sel in title_selectors:
                                     elem = card.select_one(t_sel)
-                                    if elem and elem.get_text(strip=True):
-                                        title_elem = elem
-                                        apply_link = elem.get('href', '')
-                                        if apply_link and apply_link.startswith('/'):
-                                            apply_link = urljoin('https://in.indeed.com', apply_link)
-                                        elif apply_link and not apply_link.startswith('http'):
-                                            apply_link = f"https://in.indeed.com{apply_link}"
-                                        break
+                                    if elem:
+                                        title_text = elem.get('title') or elem.get_text(strip=True)
+                                        if title_text and len(title_text) > 3:
+                                            title_elem = elem
+                                            # Get job link
+                                            link_elem = elem if elem.name == 'a' else elem.find_parent('a')
+                                            if link_elem and link_elem.get('href'):
+                                                href = link_elem['href']
+                                                if href.startswith('/'):
+                                                    apply_link = f"https://in.indeed.com{href}"
+                                                elif href.startswith('http'):
+                                                    apply_link = href
+                                            break
                                 
                                 if not title_elem:
                                     continue
                                 
-                                title = title_elem.get_text(strip=True)
+                                title = title_elem.get('title') or title_elem.get_text(strip=True)
                                 
-                                # Company selectors
+                                # Enhanced company extraction
                                 company_elem = None
                                 company_selectors = [
                                     'span[data-testid="company-name"]',
+                                    'a[data-testid="company-name"]',
                                     '.companyName',
-                                    'a.companyName',
                                     'span.companyName',
-                                    '.company',
                                     'div[data-testid="company-name"]'
                                 ]
                                 
@@ -248,13 +359,13 @@ class RealTimeJobScraper:
                                 
                                 company = company_elem.get_text(strip=True) if company_elem else "N/A"
                                 
-                                # Location selectors
+                                # Enhanced location extraction
                                 location_elem = None
                                 location_selectors = [
                                     'div[data-testid="job-location"]',
+                                    'span[data-testid="job-location"]',
                                     '.companyLocation',
-                                    '.locationsContainer',
-                                    'div[data-testid="companyLocation"]'
+                                    '.locationsContainer'
                                 ]
                                 
                                 for l_sel in location_selectors:
@@ -265,48 +376,17 @@ class RealTimeJobScraper:
                                 
                                 job_location = location_elem.get_text(strip=True) if location_elem else location
                                 
-                                # Salary selectors
-                                salary_elem = None
-                                salary_selectors = [
-                                    '.salaryText',
-                                    'span[data-testid="salary-snippet"]',
-                                    '.salary-snippet',
-                                    '.salary'
-                                ]
-                                
-                                for s_sel in salary_selectors:
-                                    elem = card.select_one(s_sel)
-                                    if elem and elem.get_text(strip=True):
-                                        salary_elem = elem
-                                        break
-                                
+                                # Salary extraction
+                                salary_elem = card.select_one('.salaryText') or card.select_one('span[data-testid="salary-snippet"]')
                                 salary = salary_elem.get_text(strip=True) if salary_elem else "Not disclosed"
                                 
-                                # Description selectors
-                                desc_elem = None
-                                desc_selectors = [
-                                    '.summary',
-                                    '.job-snippet',
-                                    'div[data-testid="job-snippet"]',
-                                    '.jobDescription'
-                                ]
-                                
-                                for d_sel in desc_selectors:
-                                    elem = card.select_one(d_sel)
-                                    if elem and elem.get_text(strip=True):
-                                        desc_elem = elem
-                                        break
-                                
-                                description = desc_elem.get_text(strip=True)[:200] + "..." if desc_elem else "No description available"
-                                
-                                if title and len(title) > 3:
+                                if title and len(title) > 5:
                                     job_data = {
                                         "id": f"indeed_{int(time.time())}_{len(jobs)}",
                                         "title": title,
                                         "company": company,
                                         "location": job_location,
                                         "salary": salary,
-                                        "description": description,
                                         "apply_link": apply_link or f"https://in.indeed.com/jobs?q={quote(keyword)}",
                                         "source": "indeed",
                                         "scraped_at": datetime.now().isoformat(),
@@ -316,72 +396,50 @@ class RealTimeJobScraper:
                                     print(f"✅ Added Indeed job: {title}")
                             
                             except Exception as e:
-                                print(f"❌ Error processing Indeed job card {i}: {e}")
+                                print(f"❌ Error processing Indeed job card {card_idx}: {e}")
                                 continue
                         
                         if jobs:
                             print(f"✅ Successfully scraped {len(jobs)} jobs from Indeed")
                             break
                     else:
-                        print(f"❌ Indeed request failed for {url}")
+                        print(f"❌ No content retrieved from Indeed URL")
                         
                 except Exception as e:
                     print(f"❌ Error with Indeed URL {url}: {e}")
                     continue
                         
         except Exception as e:
-            print(f"❌ Indeed error: {e}")
+            print(f"❌ Indeed scraping error: {e}")
         
         return jobs
     
     def scrape_naukri_realtime(self, keyword: str) -> List[Dict]:
-        """Enhanced real-time Naukri scraping with multiple fallbacks"""
+        """Enhanced real-time Naukri scraping with advanced anti-detection"""
         jobs = []
         
         try:
-            # Multiple URL patterns for better coverage
+            # Multiple Naukri URL patterns
             naukri_urls = [
-                f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs?sort=1",  # Sort by latest
-                f"https://www.naukri.com/jobs-in-india?k={quote(keyword)}&sort=1",
-                f"https://www.naukri.com/{quote(keyword)}-jobs-in-india",
-                f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs-in-bangalore",
-                f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs-in-delhi",
-                f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs-in-mumbai",
-                f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs-in-hyderabad"
+                f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs?sort=1&experience=0,1,2,3,4,5",
+                f"https://www.naukri.com/jobs-in-india?k={quote(keyword)}&sort=1&experience=0,1,2,3,4,5",
+                f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs-in-bangalore?sort=1",
+                f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs-in-delhi?sort=1",
+                f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs-in-mumbai?sort=1"
             ]
             
-            for url in naukri_urls:
+            for i, url in enumerate(naukri_urls):
                 try:
-                    print(f"🔍 Scraping Naukri: {url}")
+                    print(f"🔍 Naukri attempt {i+1}: {url}")
                     
-                    # Enhanced headers for Naukri with session rotation
-                    naukri_headers = self.get_random_headers()
-                    naukri_headers.update({
-                        'Referer': 'https://www.naukri.com/',
-                        'Origin': 'https://www.naukri.com',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                        'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
-                        'Cache-Control': 'no-cache',
-                        'Pragma': 'no-cache',
-                        'Sec-Fetch-Dest': 'document',
-                        'Sec-Fetch-Mode': 'navigate',
-                        'Sec-Fetch-Site': 'same-origin',
-                        'Sec-Ch-Ua': '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
-                        'Sec-Ch-Ua-Mobile': '?0',
-                        'Sec-Ch-Ua-Platform': '"Windows"'
-                    })
+                    # Use browser automation for first attempts
+                    use_driver = i < 2
+                    content = self.enhanced_request(url, "naukri", use_driver)
                     
-                    self.session.headers.update(naukri_headers)
-                    
-                    # Add random delay
-                    time.sleep(random.uniform(2, 5))
-                    
-                    response = self.safe_request(url)
-                    
-                    if response and response.status_code == 200 and "access denied" not in response.text.lower():
-                        soup = BeautifulSoup(response.content, 'html.parser')
+                    if content:
+                        soup = BeautifulSoup(content, 'html.parser')
                         
-                        # Multiple job card selectors to try
+                        # Multiple job card selectors for Naukri
                         job_selectors = [
                             'article[class*="jobTuple"]',
                             'div[class*="jobTuple"]',
@@ -389,57 +447,70 @@ class RealTimeJobScraper:
                             'article.jobTuple',
                             '.job-tuple',
                             '[data-job-id]',
-                            '.jobTupleHeader'
+                            '.jobTupleHeader',
+                            '.listContainer .cust-job-tuple'
                         ]
                         
                         job_cards = []
                         for selector in job_selectors:
                             cards = soup.select(selector)
                             if cards:
-                                print(f"✅ Found {len(cards)} job cards with selector: {selector}")
-                                job_cards = cards
+                                print(f"✅ Found {len(cards)} Naukri job cards with selector: {selector}")
+                                job_cards = cards[:10]  # Limit to 10
                                 break
+                        
+                        if not job_cards:
+                            print(f"⚠️ No job cards found with any selector for Naukri")
+                            continue
                         
                         print(f"📝 Processing {len(job_cards)} Naukri job cards")
                         
-                        for i, card in enumerate(job_cards[:10]):  # Limit to 10 jobs
+                        for card_idx, card in enumerate(job_cards):
                             try:
-                                # Multiple title selectors
+                                # Enhanced title extraction
                                 title_elem = None
                                 apply_link = None
                                 
-                                # Try different title selectors
                                 title_selectors = [
+                                    'a[class*="title"] span[title]',
                                     'a[class*="title"]',
                                     '.title a',
                                     'h3 a',
+                                    'h2 a',
                                     'a[title]',
-                                    '.jobTitle a',
-                                    'h2 a'
+                                    '.jobTitle a'
                                 ]
                                 
                                 for t_sel in title_selectors:
                                     elem = card.select_one(t_sel)
-                                    if elem and elem.get_text(strip=True):
-                                        title_elem = elem
-                                        apply_link = elem.get('href', '')
-                                        if apply_link and not apply_link.startswith('http'):
-                                            apply_link = urljoin('https://www.naukri.com', apply_link)
-                                        break
+                                    if elem:
+                                        title_text = elem.get('title') or elem.get_text(strip=True)
+                                        if title_text and len(title_text) > 5:
+                                            title_elem = elem
+                                            # Get job link
+                                            link_elem = elem if elem.name == 'a' else elem.find_parent('a')
+                                            if link_elem and link_elem.get('href'):
+                                                href = link_elem['href']
+                                                if not href.startswith('http'):
+                                                    apply_link = urljoin('https://www.naukri.com', href)
+                                                else:
+                                                    apply_link = href
+                                            break
                                 
                                 if not title_elem:
                                     continue
                                 
-                                title = title_elem.get_text(strip=True)
+                                title = title_elem.get('title') or title_elem.get_text(strip=True)
                                 
-                                # Company selectors
+                                # Enhanced company extraction
                                 company_elem = None
                                 company_selectors = [
+                                    'a[class*="subTitle"] span',
                                     'a[class*="subTitle"]',
                                     '.companyInfo a',
                                     '.company-name',
                                     '.subTitle a',
-                                    '.comp-name'
+                                    '.comp-name a'
                                 ]
                                 
                                 for c_sel in company_selectors:
@@ -450,40 +521,7 @@ class RealTimeJobScraper:
                                 
                                 company = company_elem.get_text(strip=True) if company_elem else "N/A"
                                 
-                                # Experience selectors
-                                exp_elem = None
-                                exp_selectors = [
-                                    'span[class*="experience"]',
-                                    '.experience',
-                                    '.exp',
-                                    '.expwdth'
-                                ]
-                                
-                                for e_sel in exp_selectors:
-                                    elem = card.select_one(e_sel)
-                                    if elem and elem.get_text(strip=True):
-                                        exp_elem = elem
-                                        break
-                                
-                                experience = exp_elem.get_text(strip=True) if exp_elem else "Not specified"
-                                
-                                # Salary selectors
-                                salary_elem = None
-                                salary_selectors = [
-                                    'span[class*="salary"]',
-                                    '.salary',
-                                    '.sal'
-                                ]
-                                
-                                for s_sel in salary_selectors:
-                                    elem = card.select_one(s_sel)
-                                    if elem and elem.get_text(strip=True):
-                                        salary_elem = elem
-                                        break
-                                
-                                salary = salary_elem.get_text(strip=True) if salary_elem else "Not disclosed"
-                                
-                                # Location selectors
+                                # Enhanced location extraction
                                 location_elem = None
                                 location_selectors = [
                                     'span[class*="location"]',
@@ -500,11 +538,28 @@ class RealTimeJobScraper:
                                 
                                 location = location_elem.get_text(strip=True) if location_elem else "India"
                                 
-                                # Skills selectors
-                                skills_elems = card.select('span[class*="skill"]') or card.select('.skill')
-                                skills = [skill.get_text(strip=True) for skill in skills_elems[:5]]
+                                # Experience extraction
+                                exp_elem = None
+                                exp_selectors = [
+                                    'span[class*="experience"]',
+                                    '.experience',
+                                    '.exp',
+                                    '.expwdth'
+                                ]
                                 
-                                if title and len(title) > 3:
+                                for e_sel in exp_selectors:
+                                    elem = card.select_one(e_sel)
+                                    if elem and elem.get_text(strip=True):
+                                        exp_elem = elem
+                                        break
+                                
+                                experience = exp_elem.get_text(strip=True) if exp_elem else "Not specified"
+                                
+                                # Salary extraction
+                                salary_elem = card.select_one('span[class*="salary"]') or card.select_one('.salary')
+                                salary = salary_elem.get_text(strip=True) if salary_elem else "Not disclosed"
+                                
+                                if title and len(title) > 5:
                                     job_data = {
                                         "id": f"naukri_{int(time.time())}_{len(jobs)}",
                                         "title": title,
@@ -512,7 +567,6 @@ class RealTimeJobScraper:
                                         "location": location,
                                         "salary": salary,
                                         "experience": experience,
-                                        "skills": skills,
                                         "apply_link": apply_link or f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs",
                                         "source": "naukri",
                                         "scraped_at": datetime.now().isoformat(),
@@ -522,21 +576,21 @@ class RealTimeJobScraper:
                                     print(f"✅ Added Naukri job: {title}")
                             
                             except Exception as e:
-                                print(f"❌ Error processing Naukri job card {i}: {e}")
+                                print(f"❌ Error processing Naukri job card {card_idx}: {e}")
                                 continue
                         
                         if jobs:
                             print(f"✅ Successfully scraped {len(jobs)} jobs from Naukri")
                             break
                     else:
-                        print(f"❌ Naukri request failed for {url}")
+                        print(f"❌ No content retrieved from Naukri URL")
                         
                 except Exception as e:
                     print(f"❌ Error with Naukri URL {url}: {e}")
                     continue
                         
         except Exception as e:
-            print(f"❌ Naukri error: {e}")
+            print(f"❌ Naukri scraping error: {e}")
         
         return jobs
     
@@ -605,76 +659,57 @@ class RealTimeJobScraper:
         return jobs
     
     def scrape_timesjobs_realtime(self, keyword: str) -> List[Dict]:
-        """Enhanced real-time TimesJobs scraping with multiple fallbacks"""
+        """Enhanced real-time TimesJobs scraping with advanced anti-detection"""
         jobs = []
         
         try:
-            # Multiple URL patterns for TimesJobs
+            # Multiple TimesJobs URL patterns
             timesjobs_urls = [
-                # Basic search with sorting
                 f"https://www.timesjobs.com/candidate/job-search.html?searchType=personalizedSearch&from=submit&txtKeywords={quote(keyword)}&cboWorkExp1=0&cboWorkExp2=30&sortBy=1",
-                # Alternative search patterns
                 f"https://www.timesjobs.com/candidate/job-search.html?searchType=Home_Search&from=submit&txtKeywords={quote(keyword)}&sortBy=1",
-                # Location-specific searches
-                f"https://www.timesjobs.com/candidate/job-search.html?searchType=personalizedSearch&from=submit&txtKeywords={quote(keyword)}&txtLocation=India&sortBy=1",
-                f"https://www.timesjobs.com/candidate/job-search.html?searchType=personalizedSearch&from=submit&txtKeywords={quote(keyword)}&txtLocation=Mumbai&sortBy=1",
-                f"https://www.timesjobs.com/candidate/job-search.html?searchType=personalizedSearch&from=submit&txtKeywords={quote(keyword)}&txtLocation=Bangalore&sortBy=1"
+                f"https://www.timesjobs.com/candidate/job-search.html?txtKeywords={quote(keyword)}&sortBy=1",
+                f"https://www.timesjobs.com/candidate/job-search.html?searchType=personalizedSearch&txtKeywords={quote(keyword)}&txtLocation=Mumbai",
+                f"https://www.timesjobs.com/candidate/job-search.html?searchType=personalizedSearch&txtKeywords={quote(keyword)}&txtLocation=Bangalore"
             ]
             
-            for url in timesjobs_urls:
+            for i, url in enumerate(timesjobs_urls):
                 try:
-                    print(f"🔍 Scraping TimesJobs: {url}")
+                    print(f"🔍 TimesJobs attempt {i+1}: {url}")
                     
-                    # Enhanced headers for TimesJobs
-                    timesjobs_headers = self.get_random_headers()
-                    timesjobs_headers.update({
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                        'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
-                        'Accept-Encoding': 'gzip, deflate, br',
-                        'DNT': '1',
-                        'Connection': 'keep-alive',
-                        'Upgrade-Insecure-Requests': '1',
-                        'Sec-Fetch-Dest': 'document',
-                        'Sec-Fetch-Mode': 'navigate',
-                        'Sec-Fetch-Site': 'same-origin',
-                        'Sec-Fetch-User': '?1',
-                        'Cache-Control': 'max-age=0',
-                        'Referer': 'https://www.timesjobs.com/',
-                        'Origin': 'https://www.timesjobs.com'
-                    })
+                    # Use browser automation for first attempts
+                    use_driver = i < 2
+                    content = self.enhanced_request(url, "timesjobs", use_driver)
                     
-                    self.session.headers.update(timesjobs_headers)
-                    
-                    # Random delay
-                    time.sleep(random.uniform(2, 5))
-                    
-                    response = self.safe_request(url)
-                    
-                    if response and response.status_code == 200:
-                        soup = BeautifulSoup(response.content, 'html.parser')
+                    if content:
+                        soup = BeautifulSoup(content, 'html.parser')
                         
-                        # Multiple job card selectors
+                        # Multiple job card selectors for TimesJobs
                         job_selectors = [
                             'li.clearfix.job-bx.wht-shd-bx',
                             '.job-bx',
                             'li[class*="job-bx"]',
                             '.clearfix.job-bx',
-                            'li.clearfix'
+                            'li.clearfix',
+                            '.job-listing'
                         ]
                         
                         job_cards = []
                         for selector in job_selectors:
                             cards = soup.select(selector)
                             if cards:
-                                print(f"✅ Found {len(cards)} job cards with selector: {selector}")
-                                job_cards = cards
+                                print(f"✅ Found {len(cards)} TimesJobs job cards with selector: {selector}")
+                                job_cards = cards[:10]  # Limit to 10
                                 break
+                        
+                        if not job_cards:
+                            print(f"⚠️ No job cards found with any selector for TimesJobs")
+                            continue
                         
                         print(f"📝 Processing {len(job_cards)} TimesJobs cards")
                         
-                        for i, card in enumerate(job_cards[:10]):
+                        for card_idx, card in enumerate(job_cards):
                             try:
-                                # Multiple title selectors
+                                # Enhanced title extraction
                                 title_elem = None
                                 apply_link = None
                                 
@@ -682,7 +717,8 @@ class RealTimeJobScraper:
                                     'h2 a',
                                     '.joblist-comp-dtls h2 a',
                                     'h3 a',
-                                    '.job-title a'
+                                    '.job-title a',
+                                    'a[href*="job-detail"]'
                                 ]
                                 
                                 for t_sel in title_selectors:
@@ -699,13 +735,14 @@ class RealTimeJobScraper:
                                 
                                 title = title_elem.get_text(strip=True)
                                 
-                                # Company selectors
+                                # Enhanced company extraction
                                 company_elem = None
                                 company_selectors = [
                                     'h3.joblist-comp-name a',
                                     '.joblist-comp-name a',
                                     '.company-name a',
-                                    'h3 a'
+                                    'h3 a',
+                                    '.comp-name a'
                                 ]
                                 
                                 for c_sel in company_selectors:
@@ -716,29 +753,14 @@ class RealTimeJobScraper:
                                 
                                 company = company_elem.get_text(strip=True) if company_elem else "N/A"
                                 
-                                # Experience selectors
-                                exp_elem = None
-                                exp_selectors = [
-                                    'span[title*="experience"]',
-                                    'li[title*="experience"]',
-                                    '.rec-detail span'
-                                ]
-                                
-                                for e_sel in exp_selectors:
-                                    elem = card.select_one(e_sel)
-                                    if elem and "year" in elem.get_text().lower():
-                                        exp_elem = elem
-                                        break
-                                
-                                experience = exp_elem.get_text(strip=True) if exp_elem else "Not specified"
-                                
-                                # Location selectors
+                                # Enhanced location extraction
                                 location_elem = None
                                 location_selectors = [
                                     'span.loc',
                                     '.location',
                                     'span[title*="location"]',
-                                    'li[title*="location"]'
+                                    'li[title*="location"]',
+                                    '.job-location'
                                 ]
                                 
                                 for l_sel in location_selectors:
@@ -749,7 +771,24 @@ class RealTimeJobScraper:
                                 
                                 location = location_elem.get_text(strip=True) if location_elem else "India"
                                 
-                                # Posted date selectors
+                                # Experience extraction
+                                exp_elem = None
+                                exp_selectors = [
+                                    'span[title*="experience"]',
+                                    'li[title*="experience"]',
+                                    '.experience',
+                                    '.exp'
+                                ]
+                                
+                                for e_sel in exp_selectors:
+                                    elem = card.select_one(e_sel)
+                                    if elem and "year" in elem.get_text().lower():
+                                        exp_elem = elem
+                                        break
+                                
+                                experience = exp_elem.get_text(strip=True) if exp_elem else "Not specified"
+                                
+                                # Posted date extraction
                                 posted_elem = None
                                 posted_selectors = [
                                     'span.sim-posted',
@@ -765,18 +804,13 @@ class RealTimeJobScraper:
                                 
                                 posted_date = posted_elem.get_text(strip=True) if posted_elem else "Recent"
                                 
-                                # Skills selectors
-                                skills_elems = card.select('.rec-detail span') or card.select('.skills span')
-                                skills = [skill.get_text(strip=True) for skill in skills_elems[:5] if skill.get_text(strip=True)]
-                                
-                                if title and len(title) > 3:
+                                if title and len(title) > 5:
                                     job_data = {
                                         "id": f"timesjobs_{int(time.time())}_{len(jobs)}",
                                         "title": title,
                                         "company": company,
                                         "location": location,
                                         "experience": experience,
-                                        "skills": skills,
                                         "apply_link": apply_link or f"https://www.timesjobs.com/candidate/job-search.html?txtKeywords={quote(keyword)}",
                                         "source": "timesjobs",
                                         "scraped_at": datetime.now().isoformat(),
@@ -786,21 +820,21 @@ class RealTimeJobScraper:
                                     print(f"✅ Added TimesJobs job: {title}")
                             
                             except Exception as e:
-                                print(f"❌ Error processing TimesJobs job card {i}: {e}")
+                                print(f"❌ Error processing TimesJobs job card {card_idx}: {e}")
                                 continue
                         
                         if jobs:
                             print(f"✅ Successfully scraped {len(jobs)} jobs from TimesJobs")
                             break
                     else:
-                        print(f"❌ TimesJobs request failed for {url}")
+                        print(f"❌ No content retrieved from TimesJobs URL")
                         
                 except Exception as e:
                     print(f"❌ Error with TimesJobs URL {url}: {e}")
                     continue
                         
         except Exception as e:
-            print(f"❌ TimesJobs error: {e}")
+            print(f"❌ TimesJobs scraping error: {e}")
         
         return jobs
     
@@ -995,6 +1029,19 @@ class RealTimeJobScraper:
             print(f"❌ Glassdoor error: {e}")
         
         return jobs
+    
+    def cleanup(self):
+        """Cleanup resources"""
+        if self.driver:
+            try:
+                self.driver.quit()
+                print("✅ Chrome driver cleaned up")
+            except Exception as e:
+                print(f"⚠️ Driver cleanup error: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup"""
+        self.cleanup()
     
     def scrape_all_platforms_parallel(self, keyword: str, location: str = "India") -> List[Dict]:
         """Scrape all platforms in parallel for real-time data"""
