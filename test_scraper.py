@@ -1,62 +1,141 @@
 #!/usr/bin/env python3
-
 """
-Test script for the advanced job scraper
+Test script for the improved job scraper
 """
 
-from advanced_scraper import advanced_scraper
-import json
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import quote
+import fake_useragent
+import time
 
-def test_scraper():
-    print("🧪 Testing Advanced Job Scraper")
-    print("=" * 50)
+def test_indeed():
+    """Test Indeed scraping"""
+    print("🔍 Testing Indeed...")
     
-    # Test 1: Basic connectivity
-    print("\n1. Testing basic connectivity...")
-    response = advanced_scraper.safe_request('https://httpbin.org/user-agent')
-    if response:
-        print("✅ Basic HTTP request working")
-        data = response.json()
-        print(f"   User-Agent: {data.get('headers', {}).get('User-Agent', 'N/A')[:80]}...")
-    else:
-        print("❌ Basic HTTP request failed")
-    
-    # Test 2: Indeed scraping
-    print("\n2. Testing Indeed scraping...")
     try:
-        indeed_jobs = advanced_scraper.scrape_indeed_advanced('python developer')
-        print(f"✅ Indeed jobs found: {len(indeed_jobs)}")
-        for i, job in enumerate(indeed_jobs[:3]):
-            print(f"   {i+1}. {job['title']} at {job['company']}")
-            if job.get('location'):
-                print(f"      Location: {job['location']}")
-    except Exception as e:
-        print(f"❌ Indeed scraping failed: {e}")
-    
-    # Test 3: Naukri scraping
-    print("\n3. Testing Naukri scraping...")
-    try:
-        naukri_jobs = advanced_scraper.scrape_naukri_advanced('python developer')
-        if naukri_jobs:
-            print(f"✅ Naukri jobs found: {len(naukri_jobs)}")
-            for i, job in enumerate(naukri_jobs[:3]):
-                print(f"   {i+1}. {job['title']} at {job['company']}")
+        ua = fake_useragent.UserAgent()
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': ua.random,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.google.com/',
+        })
+        
+        keyword = "python developer"
+        url = f"https://in.indeed.com/jobs?q={quote(keyword)}&l=India&sort=date"
+        
+        response = session.get(url, timeout=10)
+        print(f"Response status: {response.status_code}")
+        print(f"Response length: {len(response.text)}")
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Try different selectors
+            selectors = [
+                'div[data-jk]',
+                '.job_seen_beacon',
+                'td.resultContent',
+                '.jobsearch-SerpJobCard'
+            ]
+            
+            for selector in selectors:
+                cards = soup.select(selector)
+                if cards:
+                    print(f"✅ Found {len(cards)} job cards with selector: {selector}")
+                    
+                    # Extract first job
+                    if cards:
+                        first_card = cards[0]
+                        title_elem = (first_card.select_one('h2 a span[title]') or 
+                                    first_card.select_one('h2 a') or 
+                                    first_card.select_one('[data-testid="job-title"]'))
+                        
+                        if title_elem:
+                            title = title_elem.get('title') or title_elem.get_text(strip=True)
+                            print(f"First job title: {title}")
+                        
+                    return len(cards)
+            
+            print("❌ No job cards found with any selector")
         else:
-            print("⚠️ Naukri: No jobs found (possibly blocked)")
+            print(f"❌ Request failed with status {response.status_code}")
+            
     except Exception as e:
-        print(f"❌ Naukri scraping failed: {e}")
+        print(f"❌ Error: {e}")
     
-    # Test 4: TimesJobs scraping
-    print("\n4. Testing TimesJobs scraping...")
+    return 0
+
+def test_naukri():
+    """Test Naukri scraping"""
+    print("\n🔍 Testing Naukri...")
+    
     try:
-        timesjobs_jobs = advanced_scraper.scrape_timesjobs_advanced('python developer')
-        print(f"✅ TimesJobs jobs found: {len(timesjobs_jobs)}")
-        for i, job in enumerate(timesjobs_jobs[:3]):
-            print(f"   {i+1}. {job['title']} at {job['company']}")
+        ua = fake_useragent.UserAgent()
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': ua.random,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.naukri.com/',
+        })
+        
+        keyword = "python developer"
+        url = f"https://www.naukri.com/{keyword.replace(' ', '-')}-jobs"
+        
+        response = session.get(url, timeout=10)
+        print(f"Response status: {response.status_code}")
+        print(f"Response length: {len(response.text)}")
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Try different selectors
+            selectors = [
+                'article.jobTuple',
+                'div.jobTuple',
+                '.srp-jobtuple-wrapper',
+                'article[class*="jobTuple"]'
+            ]
+            
+            for selector in selectors:
+                cards = soup.select(selector)
+                if cards:
+                    print(f"✅ Found {len(cards)} job cards with selector: {selector}")
+                    
+                    # Extract first job
+                    if cards:
+                        first_card = cards[0]
+                        title_elem = (first_card.select_one('.title a') or
+                                    first_card.select_one('h3 a'))
+                        
+                        if title_elem:
+                            title = title_elem.get('title') or title_elem.get_text(strip=True)
+                            print(f"First job title: {title}")
+                        
+                    return len(cards)
+            
+            print("❌ No job cards found with any selector")
+        else:
+            print(f"❌ Request failed with status {response.status_code}")
+            
     except Exception as e:
-        print(f"❌ TimesJobs scraping failed: {e}")
+        print(f"❌ Error: {e}")
     
-    print("\n🎯 Test completed!")
+    return 0
 
 if __name__ == "__main__":
-    test_scraper()
+    print("🚀 Testing job scraper components...")
+    
+    indeed_count = test_indeed()
+    naukri_count = test_naukri()
+    
+    print(f"\n📊 Results:")
+    print(f"Indeed: {indeed_count} jobs")
+    print(f"Naukri: {naukri_count} jobs")
+    print(f"Total: {indeed_count + naukri_count} jobs")
